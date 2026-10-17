@@ -1,0 +1,43 @@
+---
+title: "Figures"
+output: pdf_document
+date: "2024-09-28"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align="center")
+```
+
+## HW5_Project figures
+
+
+```{r, echo=FALSE, fig.cap="Multiqc results-corresponds to line 48 in the RMD file", out.width = '100%'}
+knitr::include_graphics("/Users/dr.juliamonte-cristo/Multiqc_results.png")
+```
+
+```{r, echo=FALSE, fig.cap="Multiqc results-corresponds to line 54 in the RMD file", out.width = '100%'}
+knitr::include_graphics("/Users/dr.juliamonte-cristo/FASTQC_sample14_normal.png")
+```
+
+```{r, echo=FALSE, fig.cap="Multiqc results-corresponds to line 157 in the RMD file", out.width = '100%'}
+knitr::include_graphics("/Users/dr.juliamonte-cristo/hw5/after_fastp.png")
+```
+
+```{r, echo=FALSE, fig.cap="Volcano Plot-corresponds to line 557 in the RMD file", out.width = '100%'}
+knitr::include_graphics("/Users/dr.juliamonte-cristo/hw5/salmon/VolcanoPlot.png")
+```
+
+```{r, echo=FALSE, fig.cap="GO analysis-corresponds to line 563 in the RMD file", out.width = '100%'}
+knitr::include_graphics("/Users/dr.juliamonte-cristo/hw5/Enrichment_heatmap_HeatmapSelectedGO.png")
+```
+
+
+```{r, echo=FALSE, fig.cap="Somatic novel SNP's mutations-corresponds to line 582 in the RMD file", out.width = '100%'}
+knitr::include_graphics("/Users/dr.juliamonte-cristo/Desktop/Screenshot\ 2024-09-22\ at\ 15.49.41.png")
+```
+
+```{r, echo=FALSE, fig.cap="Fig. 5b,c from ref. 1-high expression of PCA3-corresponds to line 595 in the RMD file", out.width = '100%'}
+knitr::include_graphics("/Users/dr.juliamonte-cristo/Desktop/Screenshot\ 2024-09-25\ at\ 20.27.35.png")
+knitr::include_graphics("/Users/dr.juliamonte-cristo/Desktop/Screenshot\ 2024-09-25\ at\ 20.28.53.png")
+```
+

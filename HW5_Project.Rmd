@@ -1,0 +1,605 @@
+---
+title: "HW5_Project"
+output: pdf_document
+date: "2024-05-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(engine.opts = list(bash = '-o errexit'), echo = TRUE)
+library(knitr)
+```
+
+Note: I tend to write we instead of I all of my life.....
+
+## Downloading fastq files
+
+As required in the assignment, first we downloaded the FASTQ files from NCBI using the fastq-dump command with the flags:
+1. gzip: Compresses output using gzip.
+2. split-files: Splits FASTQ reads into two files according to the 2 adapters.
+3. X: Download the first X spots of a FASTQ file, in our case the first 3000000 spots.
+4. O: Download output to a given path.
+Below is a sample of the first 5 commands out of the 27 commands performed on each file in the file list in the SraRunTable.HW5.Fixed.txt file. 
+
+```{r, engine='bash', Downloading fastq files from NCBI, engine='bash'}
+fastq-dump --gzip --split-files -X 3000000 -O /Users/dr.juliamonte-cristo/hw5/data ERR031027
+fastq-dump --gzip --split-files -X 3000000 -O /Users/dr.juliamonte-cristo/hw5/data ERR031028
+fastq-dump --gzip --split-files -X 3000000 -O /Users/dr.juliamonte-cristo/hw5/data ERR031029
+fastq-dump --gzip --split-files -X 3000000 -O /Users/dr.juliamonte-cristo/hw5/data ERR031030
+fastq-dump --gzip --split-files -X 3000000 -O /Users/dr.juliamonte-cristo/hw5/data ERR031031
+```
+
+## Quality control
+
+We started the quality control by performing fastqc on all of the samples, here are 4 representative examples:
+
+```{r, engine='bash', Performing quality control with fastqc on all of the samples, engine='bash'}
+fastqc -i /Users/dr.juliamonte-cristo/hw5/data/ERR031027_pass_1.fastq.gz -o /Users/dr.juliamonte-cristo/hw5/fastqc
+fastqc -i /Users/dr.juliamonte-cristo/hw5/data/ERR031027_pass_2.fastq.gz -o /Users/dr.juliamonte-cristo/hw5/fastqc
+fastqc -i /Users/dr.juliamonte-cristo/hw5/data/ERR031028_pass_1.fastq.gz -o /Users/dr.juliamonte-cristo/hw5/fastqc
+fastqc -i /Users/dr.juliamonte-cristo/hw5/data/ERR031028_pass_2.fastq.gz -o /Users/dr.juliamonte-cristo/hw5/fastqc
+```
+
+Using all of the fastqc analyses' files received, we performed multiqc on all the files, as follows:
+
+```{r, engine='bash', Performing quality control on all the files with Multiqc, engine='bash'}
+multiqc /Users/dr.juliamonte-cristo/hw5/fastqc
+```
+
+```{r, echo=FALSE, fig.cap="Multiqc results", out.width = '100%'}
+knitr::include_graphics("/Users/dr.juliamonte-cristo/Multiqc_results.png")
+```
+
+Multiqc indicated that sample 14's normal tissue was faulty, as shown below:
+
+```{r, echo=FALSE, fig.cap="Multiqc results", out.width = '100%'}
+knitr::include_graphics("/Users/dr.juliamonte-cristo/FASTQC_sample14_normal.png")
+```
+
+The fastqc analysis of sample 14's normal tissue indicated that the quality of sequencing is not good in this tissue. Hence, in order to maintain the comparison of normal to cancerous tissues, both tissues of sample 14 were removed.
+
+We will use the following bash code to perform fastp: 
+
+```{r, engine='bash', Performing fastp on all the files excluding sample 14 using the following bash code}
+#!/bin/bash
+
+# Directory containing your FASTQ files
+FASTQ_DIR="/Users/dr.juliamonte-cristo/hw5/data"
+
+# Output directory for processed FASTQ files
+OUTPUT_DIR="/Users/dr.juliamonte-cristo/hw5/after_fastp"
+
+# Create output directory if it doesn't exist
+mkdir -p "${OUTPUT_DIR}"
+
+# Exclude sample 14's FASTQ files
+EXCLUDE_FILES=("ERR031025_1.fastq.gz" "ERR031025_2.fastq.gz" "ERR031026_1.fastq.gz" "ERR031026_2.fastq.gz")
+
+# Function to check if an element is in an array
+containsElement () {
+  local element match="$1"
+  shift
+  for element; do [[ "$element" == "$match" ]] && return 0; done
+  return 1
+}
+
+# Loop through each FASTQ file in the directory
+for FASTQ_FILE in "${FASTQ_DIR}"/*_1.fastq.gz; do
+
+    # Extract the base name of the FASTQ file without the _pass1.fastq.gz part
+    BASENAME=$(basename "${FASTQ_FILE}" "_1.fastq.gz")
+   
+    # Define paired file names
+    PASS1_FILE="${FASTQ_DIR}/${BASENAME}_1.fastq.gz"
+    PASS2_FILE="${FASTQ_DIR}/${BASENAME}_2.fastq.gz"
+
+    # Check if either file is in the exclusion list
+    if containsElement "${PASS1_FILE}" "${EXCLUDE_FILES[@]}" || containsElement "${PASS2_FILE}" "${EXCLUDE_FILES[@]}"; then
+      echo "Skipping ${BASENAME} pair"
+      continue
+    fi
+   
+    # Define output file names
+    OUTPUT_PASS1="${OUTPUT_DIR}/${BASENAME}_cleaned1.fastq.gz"
+    OUTPUT_PASS2="${OUTPUT_DIR}/${BASENAME}_cleaned2.fastq.gz"
+    UNPAIRED1="${OUTPUT_DIR}/${BASENAME}_1.unpaired.fastq.gz"
+    UNPAIRED2="${OUTPUT_DIR}/${BASENAME}_2.unpaired.fastq.gz"
+    REPORT_JSON="${OUTPUT_DIR}/${BASENAME}_report.json"
+    HTML_REPORT="${OUTPUT_DIR}/${BASENAME}_report.html"
+   
+    # Run fastp with specified parameters
+    fastp --in1 "${PASS1_FILE}" \
+          --in2 "${PASS2_FILE}" \
+          --out1 "${OUTPUT_PASS1}" \
+          --out2 "${OUTPUT_PASS2}" \
+          --unpaired1 "${UNPAIRED1}" \
+          --unpaired2 "${UNPAIRED2}" \
+          --average_qual 28 \
+          --trim_front1 10 \
+          --trim_tail1 10 \
+          --json "${REPORT_JSON}" \
+          --html "${HTML_REPORT}"
+   
+    echo "Processed ${BASENAME} pair -> ${OUTPUT_PASS1}, ${OUTPUT_PASS2}"
+done
+```
+
+In this code we trimmed 10 base pairs from the head and the tail because in the multiqc we saw a lower quality in these areas. In class, we learned that in Illumina sequencing the quality of the first base pairs is lower, as well as the quality is getting lower at the end of the sequence. Furthermore, it is common to maintain a quality score of 30 according to fastqc calculation, but in order to preserve as much data as we can without comprising the quality we used a quality score of 28 as seen in the multiqc as the threshold value. Next, we used the following code on our processed data to perform fastqc again:
+
+```{r, engine='bash', Performing fastqc on the processed data using the following bash code}
+#!/bin/bash
+
+# Directory containing your FASTQ files
+FASTQ_DIR="/Users/dr.juliamonte-cristo/hw5/after_fastp"
+
+# Output directory for processed FASTQ files
+OUTPUT_DIR="/Users/dr.juliamonte-cristo/hw5/processed_fastqc_clean"
+
+# Create output directory if it doesn't exist
+mkdir -p "${OUTPUT_DIR}"
+
+# Loop through each FASTQ file in the directory
+for FASTQ_FILE in "${FASTQ_DIR}"/*.gz; do
+    
+    # Run fastp with specified parameters
+    fastqc -i "${FASTQ_FILE}" \
+           -o "${OUTPUT_FASTQ}" 
+    
+    echo "Processed ${FASTQ_FILE} -> ${OUTPUT_FASTQ}"
+done
+```
+
+And also multiqc:
+
+```{r, engine='bash', Performing Multiqc the processed data}
+multiqc /Users/dr.juliamonte-cristo/hw5/processed_fastqc_clean
+```
+
+```{r, echo=FALSE, fig.cap="Multiqc results", out.width = '100%'}
+knitr::include_graphics("/Users/dr.juliamonte-cristo/hw5/after_fastp.png")
+```
+
+Now that the data looks cleaner and with greater precision, we can move to the alignment. 
+
+# Alignment
+
+In the same manner, we performed an alignment to the human genome with a bash code that uses bwa-mem command (from bwa tool), together with flagstat from samtools to see how the alignment worked, on the processed data as described below:   
+
+```{r, engine='bash', Performing bwa mem on the processed data using a the following bash code}
+#!/bin/bash
+
+# Set the directory containing the fastq files
+READS_DIR="/Users/dr.juliamonte-cristo/hw5/processed_fastq"
+
+# Output directory for the alignment files
+OUTPUT_DIR="/Users/dr.juliamonte-cristo/hw5/bam_files"
+mkdir -p $OUTPUT_DIR
+
+# List of sample IDs
+SAMPLE_IDS=("ERR031027" "ERR031028" "ERR031029" "ERR031030" "ERR031031" "ERR031032" "ERR031033" "ERR299297" "ERR299298" "ERR299299" "ERR031035" "ERR031038" "ERR031039" "ERR031040" "ERR031041" "ERR031042" "ERR031043" "ERR031044" "ERR031017" "ERR031018" "ERR031019" "ERR299295" "ERR299296" "ERR031022" "ERR031023" "ERR031024")  
+
+# Loop through each sample ID
+for SAMPLE_ID in "${SAMPLE_IDS[@]}"; do
+    # Define the paths for R1 and R2 files based on the sample ID
+    R1="${READS_DIR}/${SAMPLE_ID}_pass_1.fastq"
+    R2="${READS_DIR}/${SAMPLE_ID}_pass_2.fastq"
+   
+    # Output SAM file path
+    OUTPUT_BAM="${OUTPUT_DIR}/${SAMPLE_ID}_aligned.bam"
+   
+    # Run bwa mem
+    bwa mem "/Users/dr.juliamonte-cristo/hw5/hg38.fa.bwt" $R1 $R2 | samtools view -Sb -> $OUTPUT_BAM
+
+    # Sort the BAM file
+    samtools sort $OUTPUT_DIR/${SAMPLE_ID}_aligned.bam -o $OUTPUT_DIR/${SAMPLE_ID}_aligned_sorted.bam
+
+    # Index the sorted BAM file
+    samtools index $OUTPUT_DIR/${SAMPLE_ID}_aligned_sorted.bam
+    
+    # Do flagstat to file
+    samtools flagstat $OUTPUT_DIR/${SAMPLE_ID}_aligned_sorted.bam
+done
+```
+
+After a successful alignment, we want to identify genetic variations and how they might effect the manifestation of the disease. Hence, we used bcftools for variant calling with the following code:
+
+```{r, engine='bash', Variant calling bash code}
+#!/bin/bash
+
+# Define the input and output directories and the reference genome
+REFERENCE="/Users/dr.juliamonte-cristo/hw5/hg38.fa"
+INPUT_DIR="/Users/dr.juliamonte-cristo/hw5/bam_files"
+OUTPUT_DIR="/Users/dr.juliamonte-cristo/hw5/bcf_files"
+
+# Create the output directory if it doesn't exist
+mkdir -p $OUTPUT_DIR
+
+# Loop through all BAM files in the input directory
+for BAM_FILE in $INPUT_DIR/*.bam; do
+ # Extract the base name of the BAM file (without directory and extension)
+ BASE_NAME=$(basename $BAM_FILE .bam)
+
+ # Define the output BCF file path
+ BCF_FILE="${OUTPUT_DIR}/${BASE_NAME}.bcf"
+
+ # Perform variant calling
+ bcftools mpileup -Ou -f $REFERENCE $BAM_FILE | bcftools call -mv -Ob -o $BCF_FILE
+
+ # Index the BCF file
+ bcftools index $BCF_FILE
+
+ echo "Variant calling completed for $BAM_FILE. Results are in $BCF_FILE"
+done
+
+echo "All variant calling processes are completed."
+```
+
+Out of the variants found, we need only those with a quality score above 30 and those with a depth of coverage greater than 10. This threshold enables the balance between ensuring high confidence in the variant calls while retaining a reasonable number of variants for analysis, as well as threshold of 10 ensures that the variant is supported by a sufficient number of reads, reducing the likelihood of calling a variant based on sequencing errors. 
+
+```{r, engine='bash', Filtering in order to have high quality variants bash code}
+#!/bin/bash
+
+# Directory containing your BCF files
+INPUT_DIR="/Users/dr.juliamonte-cristo/hw5/bcf_files"
+OUTPUT_DIR="/Users/dr.juliamonte-cristo/hw5/filtered_bcf_files"
+
+# Create output directory if it doesn't exist
+mkdir -p "$OUTPUT_DIR"
+
+# Loop over each BCF file in the input directory
+for bcf_file in "$INPUT_DIR"/*.bcf; do
+   # Extract the base name of the file (without directory and extension)
+   base_name=$(basename "$bcf_file" .bcf)
+
+   # Define the output file name
+   output_file="$OUTPUT_DIR/${base_name}.filtered.bcf"
+
+   # Apply the filter: QUAL > 30 and DP > 10
+   bcftools filter -i 'QUAL>30 && DP>10' -Oz -o "$output_file" "$bcf_file"
+
+   # Index the filtered BCF file
+   bcftools index "$output_file"
+
+   echo "Processed and indexed: $bcf_file -> $output_file"
+done
+
+echo "All files processed."
+```
+
+As requested in the assignment, we merged the healthy samples as well as the sick in two separate files (and added the group name to each file accordingly) using bcftools merge function in a bash code for all samples: 
+
+```{r, engine='bash', Merge the healthy and sick samples}
+#!/bin/bash
+
+# Directories and file paths
+BCF_DIR="/Users/dr.juliamonte-cristo/hw5/filtered_bcf_files"
+HEALTHY_SUFFIX="_healthy"
+SICK_SUFFIX="_sick"
+MERGED_HEALTHY="merged_healthy.bcf"
+MERGED_SICK="merged_sick.bcf"
+
+# List of healthy sample identifiers (without file extensions)
+healthy_ids=("ERR031027" "ERR031029" "ERR031031" "ERR031033" "ERR031035" "ERR299299" "ERR031039" "ERR031041" "ERR031043" "ERR031017" "ERR031019" "ERR299296" "ERR031023" "ERR031025")
+
+# Function to check if an element is in an array
+contains() {
+  local e
+  for e in "${@:2}"; do [[ "$e" == "$1" ]] && return 0; done
+  return 1
+}
+
+# Create arrays to hold the filenames for merging
+healthy_files=()
+sick_files=()
+
+# Rename files and categorize them
+for file in "$BCF_DIR"/*.bcf; do
+  filename=$(basename "$file")
+  base="${filename%.*}"
+  identifier="${base%%_*}"
+ 
+  if contains "$identifier" "${healthy_ids[@]}"; then
+    new_name="${base}${HEALTHY_SUFFIX}.bcf"
+    mv "$file" "$BCF_DIR/$new_name"
+    bcftools index "$BCF_DIR/$new_name"
+    healthy_files+=("$BCF_DIR/$new_name")
+  else
+    new_name="${base}${SICK_SUFFIX}.bcf"
+    mv "$file" "$BCF_DIR/$new_name"
+    bcftools index "$BCF_DIR/$new_name"
+    sick_files+=("$BCF_DIR/$new_name")
+  fi
+done
+
+# Merge healthy samples
+if [ ${#healthy_files[@]} -gt 0 ]; then
+  bcftools merge -O b -o "$BCF_DIR/$MERGED_HEALTHY" "${healthy_files[@]}"
+  bcftools index "$BCF_DIR/$MERGED_HEALTHY"
+fi
+
+# Merge sick samples
+if [ ${#sick_files[@]} -gt 0 ]; then
+  bcftools merge -O b -o "$BCF_DIR/$MERGED_SICK" "${sick_files[@]}"
+  bcftools index "$BCF_DIR/$MERGED_SICK"
+fi
+
+echo "Merging complete."
+```
+
+Now, we'll use bcftools view to filter and edit variant calling format (VCF) with the flags: -v snps in order that the file will only include SNPs (Single Nucleotide Polymorphisms); -O b to have the output format as binary BCF; and -o that defines the output file where the filtered SNPs will be saved. Then, we created an index for the BCF or VCF file using bcftools index to make querying and accessing data faster.
+
+```{r, engine='bash', Filter only SNP's}
+bcftools view -v snps /Users/dr.juliamonte-cristo/hw5/filtered_bcf_files/merged_healthy.bcf -O b -o healthy_snps.bcf 
+bcftools view -v snps /Users/dr.juliamonte-cristo/hw5/filtered_bcf_files/merged_sick.bcf -O b -o  sick_snps.bcf
+bcftools index /Users/dr.juliamonte-cristo/hw5/healthy_snps.bcf
+bcftools index /Users/dr.juliamonte-cristo/hw5/sick_snps.bcf 
+```
+
+Our next step was to compare the two BCF files and find unique variants present in one file but not the other using bcftools isec with the flags -C that selects variants that are unique to the sick sample but not in the healthy one, and -p to specify the output directory where the result of the intersection will be stored. 
+
+```{r, engine='bash', Intersecting SNP's between the healthy and sick samples}
+bcftools isec -C /Users/dr.juliamonte-cristo/hw5/sick_snps.bcf /Users/dr.juliamonte-cristo/hw5/healthy_snps.bcf -p /Users/dr.juliamonte-cristo/hw5/intsichea
+```
+
+This results in a complied VCF file of the results that now we'll intersect with known clinical variants using bedtools intersect to find overlaps. We used the -v flag in order the the output file will include only the lines from 0000.vcf that didn't overlap with any features in SNPs.ClinVar.JAN24.bed, resulting in the exclution of common variants; the -a and -b flags to indicate which file to include the results of the intersection process; and the -header flag that ensures the VCF header is preserved in the output.
+
+```{r, engine='bash', Finding novel somatic variants}
+gunzip -c /Users/dr.juliamonte-cristo/SNPs.ClinVar.JAN24.bed.gz > SNPs.ClinVar.JAN24.bed
+bedtools intersect -v -a /Users/dr.juliamonte-cristo/hw5/intsichea/0000.vcf -b SNPs.ClinVar.JAN24.bed -header > somatic_novel_newnew.vcf
+```
+
+We used the result of the previous command and used bedtools intersect to find novel somatic variants overlaps with flags that we previously explained. 
+
+```{r, engine='bash', Salmon index}
+wget https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/refMrna.fa.gz
+salmon index -t refMrna.fa.gz -i hg38_refGene_index
+```
+
+Now, we'll Use Salmon to quantify per-sample expression levels. Hence, we first downloaded the reference fasta and indexed it. 
+
+```{r, engine='bash', Salmon script}
+#!/usr/bin/env bash
+
+# Directory containing your FASTQ files
+FASTQ_DIR="/Users/dr.juliamonte-cristo/hw5/after_fastp"
+
+# Output directory for processed FASTQ files
+OUTPUT_DIR="/Users/dr.juliamonte-cristo/hw5/salmon"
+
+# Create output directory if it doesn't exist
+mkdir -p "${OUTPUT_DIR}"
+
+# Samples
+accessions=("ERR031027" "ERR031028" "ERR031029" "ERR031030" "ERR031031" "ERR031032" "ERR031033" "ERR299297" "ERR299298" "ERR299299" "ERR031035" "ERR031038" "ERR031039" "ERR031040" "ERR031041" "ERR031042" "ERR031043" "ERR031044" "ERR031017" "ERR031018" "ERR031019" "ERR299295" "ERR299296" "ERR031022" "ERR031023" "ERR031024")
+
+for acc in "${accessions[@]}"; do
+  echo salmon quant -i /Users/dr.juliamonte-cristo/hg38_refGene_index -l A -1 "${FASTQ_DIR}/${acc}_cleaned1.fastq.gz" -2 "${FASTQ_DIR}/${acc}_cleaned2.fastq.gz" -p 8 --validateMappings -o "${OUTPUT_DIR}/${acc}"
+  salmon quant -i /Users/dr.juliamonte-cristo/hg38_refGene_index -l A -1 "${FASTQ_DIR}/${acc}_cleaned1.fastq.gz" -2 "${FASTQ_DIR}/${acc}_cleaned2.fastq.gz" -p 8 --validateMappings -o "${OUTPUT_DIR}/${acc}"
+done
+```
+
+Then, we executed salmon quantify on all of our accessions to quantify transcript abundances from RNA-seq data, adding the -i flag to specify the directory containing the pre-built Salmon index; the -l flag to select library type A- automatic one, allowing Salmon to infer the library type from the data; flags -1 and -2 specifies the first and second the paired-end reads sets (forward and reverse reads, accordingly) in FASTQ format; -p flag to select 8 threads to use in mapping; and --validateMappings flag in order that Salmon will validate read mappings to the reference, and by that improve the accuracy by correcting potential mismatches between reads and the reference transcriptome.
+
+```{r, engine='bash', Merge Salmon's result to one file}
+python /Users/dr.juliamonte-cristo/transcript_to_gene.py /Users/dr.juliamonte-cristo/TranscriptToGene.hg38.tsv /Users/dr.juliamonte-cristo/hw5/salmon /Users/dr.juliamonte-cristo/hw5/out_file_merged.tsv 
+```
+
+The salmon quantify gives an output of a directory of files each of one belonging to one sample. In order to perform a broader scale analysis, we'll use the script
+transcript_to_gene.py to obtain one file containing the per-sample per-gene reads
+counts and TPM levels.
+
+```{r, engine='bash', PyDESeq2 differential expression analysis}
+from pathlib import Path
+import os
+import pickle as pkl
+
+from pydeseq2.dds import DeseqDataSet
+from pydeseq2.default_inference import DefaultInference
+from pydeseq2.ds import DeseqStats
+from pydeseq2.utils import load_example_data
+import pandas as pd
+import numpy as np
+import dash_bio
+import plotly.express as px
+
+out_dir = Path("/Users/dr.juliamonte-cristo/hw5/salmon")
+out_dir.mkdir(parents=True, exist_ok=True)  # Create path if it doesn't exist
+
+# Data loading
+# Update this path to the appropriate location on your system
+counts_file = Path("/Users/dr.juliamonte-cristo/hw5/out_file_merged.tsv")
+
+counts_df = (
+    pd.read_table(counts_file)
+    .pivot(
+        columns="Gene",
+        index="Sample",
+        values="NumReads"
+    )
+    .sort_index()
+    .astype(int)
+)
+
+metadata = pd.DataFrame(
+    {
+        "Sample": [
+            "Normal", "Tumor", "Normal", "Tumor", "Normal", "Tumor",
+            "Normal", "Tumor", "Normal", "Tumor", "Normal", "Tumor",
+            "Normal", "Tumor", "Normal", "Tumor", "Normal", "Tumor",
+            "Normal", "Tumor", "Normal", "Tumor", "Normal", "Tumor",
+            "Normal", "Tumor"
+        ]
+    },
+    index=[
+        "ERR031027", "ERR031028", "ERR031029", "ERR031030", "ERR031031", "ERR031032",
+        "ERR031033", "ERR299297", "ERR031035", "ERR299298", "ERR299299", "ERR031038",
+        "ERR031039", "ERR031040", "ERR031041", "ERR031042", "ERR031043", "ERR031044",
+        "ERR031017", "ERR031018", "ERR031019", "ERR299295", "ERR299296", "ERR031022",
+        "ERR031023", "ERR031024"
+    ]
+)
+
+# Preprocessing
+samples_to_keep = ~metadata["Sample"].isna()
+counts_df = counts_df.loc[samples_to_keep]
+metadata = metadata.loc[samples_to_keep]
+
+genes_to_keep = counts_df.columns[counts_df.sum(axis=0) >= 10]
+counts_df = counts_df[genes_to_keep]
+
+# Ensure indices are sorted and aligned
+counts_df = counts_df.sort_index()
+metadata = metadata.sort_index()
+
+print("Counts DataFrame indices:")
+print(counts_df.index)
+
+print("Metadata indices:")
+print(metadata.index)
+
+# DeseqDataSet Initialization
+inference = DefaultInference(n_cpus=8)
+dds = DeseqDataSet(
+    counts=counts_df,
+    metadata=metadata,
+    design_factors="Sample",
+    refit_cooks=True,
+    inference=inference,
+)
+
+# Running DESeq2
+dds.deseq2()
+print(dds)
+
+# Statistical Analysis
+stat_res = DeseqStats(dds, inference=inference)
+stat_res.summary()
+
+dds.varm["LFC"]
+
+stat_res_df = stat_res.results_df.reset_index()
+stat_res_df["-log10(padj)"] = -np.log10(stat_res_df["padj"])
+
+# Significant Genes
+significantly_changed_genes = stat_res_df.loc[
+  (stat_res_df["log2FoldChange"].abs() >= 2) &
+    (stat_res_df["-log10(padj)"] >= -np.log10(0.00005)),
+  ["Gene"]
+]
+print(significantly_changed_genes['Gene'])
+significantly_changed_genes.to_csv("significantly_changed_genes.csv", index=False)
+positively_significantly_changed_genes = stat_res_df.loc[
+  (stat_res_df["log2FoldChange"] >= 2) &
+    (stat_res_df["-log10(padj)"] >= -np.log10(0.00005)),
+  ["Gene"]
+]
+print(positively_significantly_changed_genes['Gene'])
+positively_significantly_changed_genes.to_csv("positively_significantly_changed_genes.csv", index=False)
+# Define the cutoffs
+log2fc_cutoff = 2
+padj_cutoff = -np.log10(0.00005)
+
+# Create a new column 'regulation' to categorize the genes
+stat_res_df["regulation"] = "Not Significant"
+stat_res_df.loc[
+    (stat_res_df["log2FoldChange"] >= log2fc_cutoff) & 
+    (stat_res_df["-log10(padj)"] >= padj_cutoff), 
+    "regulation"
+] = "Upregulated"
+stat_res_df.loc[
+    (stat_res_df["log2FoldChange"] <= -log2fc_cutoff) & 
+    (stat_res_df["-log10(padj)"] >= padj_cutoff), 
+    "regulation"
+] = "Downregulated"
+
+# Volcano Plot
+fig = px.scatter(
+    stat_res_df,
+    x="log2FoldChange",
+    y="-log10(padj)",
+    color="regulation",  # Color by the regulation column
+    title="A volcano plot demonstrating the significance of change in<br>expression due to cancer",
+    hover_data=["Gene"],
+    color_discrete_map={
+        "Upregulated": "blue", 
+        "Downregulated": "red", 
+        "Not Significant": "gray"
+    }  # Define the colors for each category
+)
+
+# Add lines for cutoffs
+fig.add_shape(
+    type="line",
+    x0=-log2fc_cutoff, x1=-log2fc_cutoff,
+    y0=0, y1=stat_res_df["-log10(padj)"].max(),
+    line=dict(color="red", width=2, dash="dash"),
+)
+fig.add_shape(
+    type="line",
+    x0=log2fc_cutoff, x1=log2fc_cutoff,
+    y0=0, y1=stat_res_df["-log10(padj)"].max(),
+    line=dict(color="red", width=2, dash="dash"),
+)
+fig.add_shape(
+    type="line",
+    x0=stat_res_df["log2FoldChange"].min(), x1=stat_res_df["log2FoldChange"].max(),
+    y0=padj_cutoff, y1=padj_cutoff,
+    line=dict(color="black", width=2, dash="dash"),
+)
+
+# Update layout and save
+fig.update_layout(template="plotly_white", width=600, height=400)
+fig.write_image(Path(out_dir, "VolcanoPlot.png"), width=600, height=400)
+fig.show()
+```
+
+In order to use PyDESeq2 for differential expression analysis, we used a code previously used in the class exercise ??? with minor modifications. First, we changed the data provided from COVID19 patients to our accessions, and categorized them according to basal or tumor samples. In addition, we changed the cutoff according to the assignment's requirements. Then, we classified genes to "significantly changed" and "positively significantly changed" genes according to the new cutoffs that were saved to files. In the end, we made minor aesthetics changes to the volcano plot with lines drawn according to the cutoffs above indicting the up-regulated genes in blue and down-regulated genes in red.
+
+```{r, echo=FALSE, fig.cap="Volcano Plote", out.width = '100%'}
+knitr::include_graphics("/Users/dr.juliamonte-cristo/hw5/salmon/VolcanoPlot.png")
+```
+
+As requested in the assignment, we used the metascape website to perform GO analysis on the significantly changed genes, and chose the first plot in that output, which is a bar plot of enriched GO terms across the input genes list, colored by p-values.
+
+```{r, echo=FALSE, fig.cap="GO analysis", out.width = '100%'}
+knitr::include_graphics("/Users/dr.juliamonte-cristo/hw5/Enrichment_heatmap_HeatmapSelectedGO.png")
+```
+
+To conclude the project, we want to combine our insights from novel somatic variants and differentially expressed genes in prostate cancer. We took only positively significantly changed genes (from step 7), and counted the number of novel somatic variants (from step 5) per each such gene. To link the gene symbols of the positively significantly changed genes to their gene ID equivalents (file 4) and use that to link these genes to their coordinates in the genes bed file (file 2), we used the awk command to reformat the GeneIDGeneSymbol.txt file to a refined workable version. Meaning, we used a comma (,) as the field separator (-F","), with the condition of NR > 1 to ensure that the operation is performed only on lines after the header row,as well as the gsub function to remove all double-quote characters (") from the first and second fields ($1 and $2, accordingly). Then, we used grep to search for lines in cleaned_gene_symbl.txt that match any Gene Symbol or ID listed in positively_significantly_changed_genes.txt, and write the matching lines to gene_id_gene_symbl.txt using the -F option to interpret the fixed strings, and the -f option to specify a file containing the needed patterns. This was followed by an additional awk command to match the gene symbols between two files to output their corresponding Gene IDs along with genomic coordinates. It reads the first file (gene_id_gene_symbl.txt) to map Gene Symbols to Gene IDs. Then, for each Gene Symbol in the second file (Genes.RefSeq.JAN24.bed), it checks for a match in the first file and prints the chromosome, start, and end positions from the second file, along with the Gene ID, into a new file (genesCoordinates1.bed). The command ensures tab-separated formatting and adds placeholders for the score (.) and strand (+) fields. With the new bed file formed, we used bedtools sort to rearrange the coordinated before the bedtools merge. Despite the assignment's requirement to use bedtools merge -i <path_to_file> -s -c 4,5,6 -o distinct, sum,distinct, we received time and again the following error: Unrecognized parameter: sum,distinct. Hence, we used the bedtools merge -i genesCoordinates_sorted1.bed -c 4,6 -o distinct,distinct -delim ";" -s command to intersect the merged gene coordinates with the novel somatic variants from VCF file and count the number of SNPs per interval. Meaning, the bedtools merge command merges overlapping or adjacent genomic intervals from the input file genesCoordinates_sorted1.bed, using the -s flag to ensure that only intervals on the same strand are merged, the -c 4,6 flag to specify that columns 4 (Gene IDs) and column 6 (strand) should be retained from the merged intervals, the -o distinct,distinct flag that only unique values are kept for these columns and the -delim ";" flag to set the semicolon as the separator between multiple distinct values in the output file. To find overlapping regions between the two files: the gene intervals in genesCoordinates_sortmX.bed and the somatic variants in somatic_novel_newnew.vcf, we used the bedtools intersect command as previously explained. We want to count the number of unique Gene IDs from the file containing overlapping gene intervals and somatic variants, thus, we used the awk command. We printed the fourth column ($4) that corresponds to the Gene IDs, sorted them alphabetically,and with uniq -c counted the occurrences of each unique Gene ID, outputting the count alongside each ID, sorting them in descending order. 
+
+```{r, engine='bash', Count SNP's per gene}
+awk -F"," 'NR > 1 { gsub(/"/, "", $1); gsub(/"/, "", $2); print $2 "\t" $1}' /Users/dr.juliamonte-cristo/GeneIDGeneSymbol.txt > cleaned_gene_symbl.txt
+awk -F"," 'NR > 1 {gsub(/"/, "", $1); print $1}' positively_significantly_changed_genes.csv > positively_significantly_changed_genes.txt
+grep -Ff positively_significantly_changed_genes.txt cleaned_gene_symbl.txt > gene_id_gene_symbl.txt
+awk 'BEGIN {FS=OFS="\t"} NR==FNR {a[$2]=$1; next} $4 in a {print $1, $2, $3, a[$4], ".", "+"}' gene_id_gene_symbl.txt /Users/dr.juliamonte-cristo/hw5/Genes.RefSeq.JAN24.bed > genesCoordinates1.bed
+bedtools sort -i genesCoordinates1.bed > genesCoordinates_sorted1.bed
+bedtools merge -i genesCoordinates_sorted1.bed -c 4,6 -o distinct,distinct -delim ";" -s > genesCoordinates_sortmX.bed
+bedtools intersect -a genesCoordinates_sortmX.bed -b /Users/dr.juliamonte-cristo/somatic_novel_newnew.vcf -wa -wb > genesCoordinates_sortmX_snps.bed
+awk '{print $4}' genesCoordinates_sortmX_snps.bed | sort | uniq -c | sort -nr > genesCoordinates_sortmX_snps.txt
+```
+
+This gave us a list of the 20 genes with the most such SNPs inside it as shown below.
+
+```{r, echo=FALSE, fig.cap="GO analysis", out.width = '100%'}
+knitr::include_graphics("/Users/dr.juliamonte-cristo/Desktop/Screenshot\ 2024-09-22\ at\ 15.49.41.png")
+```
+
+Using the awk command, we identified duplicate Gene IDs from the file genesCoordinates_sortmX_snps.txt, sorted alphabetically and filtered with uniq -d those that appear more than once in the input file as follows: 
+
+```{r, engine='bash', Gene Coordinates}
+awk '{print $2}' genesCoordinates_sortmX_snps.txt | sort | uniq -d
+```
+
+This process didn't yield results, meaning the SNP's count show unique genetic regions. 
+The gene that showed the largest number of SNP's somatic mutations was the PCA3 gene, also known as Prostate cancer antigen 3 (PCA3). This gene is a prostate cancer-specific long noncoding RNA (lncRNA) that is known to play a role in prostate cancer progression that is mediated by nucleoplasmic lamins. Furthermore, PCA3 is also known to be involved in the control of prostate cancer cell survival and modulates cancer-related genes. Experiments also showed that PCA3 was involved in the control of chromatin organization in several genomic regions as well as that its expression levels can be an effective predictor of malignant prostate cancer (1). Hence, increased expression levels of PCA3 may indicate on extensive modulation of cancer-related genes, that prompts the prostate cancer's progression.
+
+```{r, echo=FALSE, fig.cap="Fig. 5b,c from ref. 1-high expression of PCA3", out.width = '100%'}
+knitr::include_graphics("/Users/dr.juliamonte-cristo/Desktop/Screenshot\ 2024-09-25\ at\ 20.27.35.png")
+knitr::include_graphics("/Users/dr.juliamonte-cristo/Desktop/Screenshot\ 2024-09-25\ at\ 20.28.53.png")
+```
+
+We couldn't find enough research paper explaining the connection between the high expression levels of PCA3 the creation of somatic mutations in that gene. However, we did find research papers showing the connection between lncRNA and somatic mutations in different types of cancer. One of them (2) showed that somatic mutations can act through lncRNAs to enhance pathological cancer cell fitness. This may explain the high expression levels of PCA3 together with the novel somatic SNP's mutations found.
+
+## Refrences
+
+1. Ito, S., Ueda, T., Yokoyama, A. et al. PCA3 controls chromatin organization and p53 signal activation by regulating LAP2α-lamin A complexes. Cancer Gene Ther 29, 358–368 (2022). https://doi.org/10.1038/s41417-021-00314-8
+2. Esposito, R., Lanzós, A., Uroda, T. et al. Tumour mutations in long noncoding RNAs enhance cell fitness. Nat Commun 14, 3342 (2023). https://doi.org/10.1038/s41467-023-39160-7
